@@ -7,6 +7,8 @@
 
 #include "test_fft3d.h"
 
+#include <caliper/cali.h>
+
 #ifdef BENCH_C2C
 template<typename precision>
 struct bench_types{
@@ -31,6 +33,7 @@ struct bench_types{
 
 template<typename backend_tag, typename precision_type, typename index>
 void benchmark_fft(std::array<int,3> size_fft, std::deque<std::string> const &args){
+    CALI_CXX_MARK_FUNCTION;
 
     using input_type = typename bench_types<precision_type>::input;
     using output_type = typename bench_types<precision_type>::output;
@@ -72,6 +75,8 @@ void benchmark_fft(std::array<int,3> size_fft, std::deque<std::string> const &ar
         return -1;
         #endif
     }();
+
+    CALI_MARK_BEGIN("init");
 
     std::vector<box3d<index>> inboxes  = heffte::split_world(world, proc_i);
     std::vector<box3d<index>> outboxes = heffte::split_world((r2c_dir == -1) ? world : world.r2c(r2c_dir), proc_o);
@@ -140,28 +145,41 @@ void benchmark_fft(std::array<int,3> size_fft, std::deque<std::string> const &ar
     // Define workspace array
     typename heffte::fft3d<backend_tag>::template buffer_container<output_type> workspace(fft.size_workspace());
 
+    CALI_MARK_END("init");
+
+    CALI_MARK_BEGIN("warmup");
     // Warmup
     heffte::add_trace("mark warmup begin");
     fft.forward(input_array, output_array,  scale::full);
     fft.backward(output_array, input_array);
+    CALI_MARK_END("warmup");
 
     // Execution
     int const ntest = nruns(args);
     MPI_Barrier(fft_comm);
     double t = -MPI_Wtime();
+    CALI_CXX_MARK_LOOP_BEGIN(cali_loop, "exec");
     for(int i = 0; i < ntest; ++i) {
+        CALI_MARK_BEGIN("forward");
         heffte::add_trace("mark forward begin");
         fft.forward(input_array, output_array, workspace.data(), scale::full);
+        CALI_MARK_END("forward");
+        CALI_MARK_BEGIN("backward");
         heffte::add_trace("mark backward begin");
         fft.backward(output_array, input_array, workspace.data());
+        CALI_MARK_END("backward");
     }
+    CALI_CXX_MARK_LOOP_END(cali_loop);
+    CALI_MARK_BEGIN("sync");
     #ifdef Heffte_ENABLE_GPU
     if (backend::uses_gpu<backend_tag>::value)
         gpu::synchronize_default_stream();
     #endif
     MPI_Barrier(fft_comm);
     t += MPI_Wtime();
+    CALI_MARK_END("sync");
 
+    CALI_MARK_BEGIN("validate");
     // Get execution time
     double t_max = 0.0;
 	MPI_Reduce(&t, &t_max, 1, MPI_DOUBLE, MPI_MAX, 0, fft_comm);
@@ -225,6 +243,7 @@ void benchmark_fft(std::array<int,3> size_fft, std::deque<std::string> const &ar
         cout << "Max error:    " << mpi_max_err << "\n";
         cout << endl;
     }
+    CALI_MARK_END("validate");
 }
 
 template<typename backend_tag>

@@ -70,6 +70,7 @@ configure_file("${CMAKE_CURRENT_SOURCE_DIR}/include/heffte_config.cmake.h"
                "${CMAKE_CURRENT_BINARY_DIR}/include/heffte_config.h")
 
 # find common dependencies
+find_package(caliper REQUIRED)
 find_package(MPI REQUIRED) # always a dependency
 
 list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
